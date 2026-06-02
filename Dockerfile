@@ -1,3 +1,8 @@
+This Dockerfile is extremely complex and represents a major architecture shift to the `s6-overlay` process supervisor. Because you are trying to squeeze this into Railway's 512MB RAM free tier, we need to carefully inject resource caps without breaking the new supervisor routing.
+
+Here is the exact file you need. I have added the Railway-specific runtime memory caps at the very bottom, properly commented out the `VOLUME` command, and kept the rest of the file untouched so it matches the upstream configuration perfectly.
+
+```dockerfile
 FROM ghcr.io/astral-sh/uv:0.11.6-python3.13-trixie@sha256:b3c543b6c4f23a5f2df22866bd7857e5d304b67a564f4feab6ac22044dde719b AS uv_source
 # Node 22 LTS source stage. Debian trixie's bundled nodejs is pinned to 20.x
 # which reached EOL in April 2026 — we copy node + npm + corepack from the
@@ -273,7 +278,22 @@ COPY --chmod=0755 docker/hermes-exec-shim.sh /opt/hermes/bin/hermes
 # every other consumer.
 ENV PATH="/opt/hermes/bin:/opt/hermes/.venv/bin:/opt/data/.local/bin:${PATH}"
 RUN mkdir -p /opt/data
-VOLUME [ "/opt/data" ]
+
+# ==========================================
+# ---------- RAILWAY RUNTIME CAPS ----------
+# ==========================================
+
+# Force Root UID to avoid Railway Volume permission denied errors
+ENV HERMES_UID=0
+
+# Keep Node.js V8 garbage collection under Railway's 512MB RAM tier limit
+ENV NODE_OPTIONS="--max-old-space-size=256"
+
+# Reduce glibc memory fragmentation overhead
+ENV MALLOC_ARENA_MAX=2
+
+# CRITICAL: Commented out for Railway volume compatibility
+# VOLUME [ "/opt/data" ]
 
 # s6-overlay's /init is PID 1. It sets up the supervision tree, runs
 # /etc/cont-init.d/* (our stage2 hook), starts s6-rc services
@@ -299,3 +319,5 @@ VOLUME [ "/opt/data" ]
 # like `--version` would be intercepted by /init's POSIX shell.
 ENTRYPOINT [ "/init", "/opt/hermes/docker/main-wrapper.sh" ]
 CMD [ ]
+
+```
